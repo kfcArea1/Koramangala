@@ -1,6 +1,5 @@
-<meta name='viewport' content='width=device-width, initial-scale=1'/>
 <!DOCTYPE html>
-<html lang="en"> 
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -96,57 +95,122 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script>
-        document.addEventListener("contextmenu", (event) => event.preventDefault()); // Disable right-click
+        const storeID = "91KDIPL572-01";
 
-        document.addEventListener("keydown", (event) => {
-            if (
-                event.key === "F12" || 
-                (event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(event.key)) ||
-                (event.ctrlKey && ["U", "S", "P"].includes(event.key))
-            ) {
-                event.preventDefault();
+        function convertExcelDate(serial) {
+            const date = new Date((serial - 25569) * 86400 * 1000);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function convertExcelTime(serial) {
+            const totalMilliseconds = Math.round(serial * 24 * 60 * 60 * 1000);
+            const hours = String(Math.floor(totalMilliseconds / (60 * 60 * 1000))).padStart(2, '0');
+            const minutes = String(Math.floor((totalMilliseconds % (60 * 60 * 1000)) / (60 * 1000))).padStart(2, '0');
+            const seconds = String(Math.floor((totalMilliseconds % (60 * 1000)) / 1000)).padStart(2, '0');
+            const milliseconds = String(totalMilliseconds % 1000).padStart(3, '0');
+            return `${hours}:${minutes}:${seconds}.${milliseconds}`;
+        }
+
+        function generateSurveyLink(row) {
+            const receiptNo = row['Receipt No.'];
+            const salesType = row['Sales Type'];
+
+            let surveyModel = '';
+            let orderID = '';
+            let numericOT = '';
+
+            if (/^\d+$/.test(receiptNo) && salesType === 'TAKEAWAY') {
+                surveyModel = '6.0';
+                orderID = receiptNo;
+                numericOT = '2';
+            } else if (/^\d+$/.test(receiptNo) && salesType === 'DINE-IN') {
+                surveyModel = '6.0';
+                orderID = receiptNo;
+                numericOT = '1';
+            } else if (receiptNo.startsWith('K260') && salesType === 'TAKEAWAY') {
+                surveyModel = '4.0';
+                orderID = receiptNo.slice(-4);
+                numericOT = '2';
+            } else if (receiptNo.startsWith('K260') && salesType === 'DINE-IN') {
+                surveyModel = '4.0';
+                orderID = receiptNo.slice(-4);
+                numericOT = '1';
+            } else if (receiptNo.startsWith('K260') && salesType === 'DELIVERY') {
+                surveyModel = '3.0';
+                orderID = receiptNo;
+                numericOT = '3';
+            } else {
+                return null;
             }
+
+            const date = convertExcelDate(row['Date']);
+            const time = convertExcelTime(row['Time']);
+            const phoneNumber = `91${row['Sell-to Contact No.']}`;
+            const isoDateTime = `${date}T${time}Z`;
+
+            const data = {
+                "S": storeID,
+                "OI": orderID,
+                "D": date,
+                "TM": time,
+                "DTM": isoDateTime,
+                "TI": orderID,
+                "OT": numericOT,
+                "SM": surveyModel,
+                "PH": phoneNumber
+            };
+
+            const encodedData = btoa(JSON.stringify(data));
+            return `https://customer.kfc-listens.com/jfe/form/SV_8bHC0noyvM3jPWC?Q_EED=${encodedData}`;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                const data = new Uint8Array(event.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+                const tableBody = document.querySelector('#linkTable tbody');
+                tableBody.innerHTML = ''; 
+
+                sheetData
+                    .filter(row => {
+                        const posReceipt = row['POS Receipt No.'] || '';
+                        return !(
+                            posReceipt.includes('K260SWG') || 
+                            posReceipt.includes('K260ZMT') || 
+                            posReceipt.includes('K260MAGIC')
+                        );
+                    })
+                    .forEach(row => {
+                        const link = generateSurveyLink(row);
+                        
+                        if (link) {
+                            const newRow = document.createElement('tr');
+                            newRow.innerHTML = `
+                                <td>${row['Receipt No.']}</td>
+                                <td>${row['Sales Type']}</td>
+                                <td>${link.includes('SM=6.0') ? '6.0' : 
+                                       link.includes('SM=4.0') ? '4.0' : 
+                                       link.includes('SM=3.0') ? '3.0' : 'Unknown'}</td>
+                                <td class="generated-link">${link}</td>
+                            `;
+                            tableBody.appendChild(newRow);
+                        }
+                    });
+            };
+
+            reader.readAsArrayBuffer(file);
         });
-
-        function detectDevTools() {
-            let devtoolsOpen = false;
-
-            const element = new Image();
-            Object.defineProperty(element, "id", {
-                get: function() {
-                    devtoolsOpen = true;
-                    alert("Developer Tools Detected! Redirecting...");
-                    window.location.href = "about:blank";
-                }
-            });
-
-            console.log("%c", element);
-        }
-
-        function detectDebugger() {
-            setInterval(() => {
-                const before = performance.now();
-                debugger;
-                const after = performance.now();
-                if (after - before > 200) { // DevTools slows execution time
-                    alert("DevTools Detected! Closing...");
-                    window.location.href = "about:blank";
-                }
-            }, 1000);
-        }
-
-        function detectDevToolsResize() {
-            setInterval(() => {
-                if (window.outerWidth - window.innerWidth > 160 || window.outerHeight - window.innerHeight > 160) {
-                    alert("DevTools Detected! Redirecting...");
-                    window.location.href = "about:blank";
-                }
-            }, 2000);
-        }
-
-        detectDevTools();
-        detectDebugger();
-        detectDevToolsResize();
 
         function copyLinks() {
             const links = Array.from(document.querySelectorAll('.generated-link')).map(cell => cell.textContent).join('\n');
@@ -156,6 +220,15 @@
                 console.error('Failed to copy links: ', err);
             });
         }
+
+        document.addEventListener("contextmenu", (event) => event.preventDefault());
+
+        document.addEventListener("keydown", (event) => {
+            if (event.ctrlKey && ["u", "U", "I", "J", "C"].includes(event.key) || event.key === "F12") {
+                event.preventDefault();
+            }
+        });
+
     </script>
 </body>
 </html>
